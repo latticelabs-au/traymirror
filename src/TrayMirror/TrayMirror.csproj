@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The WPF shell. UseWPF is set here and only here: Directory.Build.props keeps it
+    out of the repo-wide defaults so TrayMirror.Core stays free of WPF and testable
+    without a dispatcher.
+
+    There is no App.xaml. Every window this application creates is borderless and
+    has no WPF content of its own (DWM composites the pixels), so a XAML entry point
+    would add a build step and a generated Main for no benefit. Program.Main is the
+    entry point instead.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>TrayMirror</RootNamespace>
+    <AssemblyName>traymirror</AssemblyName>
+    <StartupObject>TrayMirror.Program</StartupObject>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>traymirror.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TrayMirror.Core\TrayMirror.Core.csproj" />
+  </ItemGroup>
+
+</Project>

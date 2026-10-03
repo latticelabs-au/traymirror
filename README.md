@@ -27,15 +27,16 @@ traymirror fills exactly that gap. It places a borderless, topmost window on eac
 - **Live GPU-composited thumbnail.** The mirrored strip updates in real time as tray icons change, animate, or show badge indicators. No polling interval, no visible lag.
 - **Per-monitor DPI aware.** The source crop rectangle is computed in physical pixels; the host window declares per-monitor DPI v2 awareness so Windows scales the thumbnail correctly to each display.
 - **Zero CPU at rest.** DWM composites the thumbnail on the GPU. The app's CPU usage when idle is negligible.
-- **Click routing.** Left-clicking and right-clicking a mirrored icon translates input to the matching position on the primary taskbar, so the icon responds as it does on the primary. Classic Win32 menus are then moved across to the mirror. See the caveats for what XAML flyouts do.
+- **Click routing.** Clicking a mirrored icon works out which icon it was by arithmetic, then activates the real one. A left-click invokes it through UI Automation, so the cursor never moves and no window loses focus, which is what makes a flyout close again on the second click. Right-clicks, middle-clicks and the wheel are synthesised at the matching position on the primary taskbar. Whatever opens is then moved across: classic `#32768` menus, the quick-settings panel, and the ordinary windows modern tray applications use instead of a menu.
 - **Automatic repositioning.** The mirror window repositions itself when the primary tray boundary changes (icon added, removed, or rescaled) and when monitors are added, removed, or reconfigured.
+- **Hides with the taskbar.** When an application goes full screen and the shell puts the taskbar away, the mirror goes with it and comes back when the taskbar does.
 - **No injection.** Nothing is loaded into `explorer.exe`. The `SetWinEventHook` registrations are out of process, tray boundaries come from UI Automation, and rendering is `DwmRegisterThumbnail`.
 
 ---
 
 ## 🖥️ Requirements
 
-- **Windows 11** build 22000 (21H2) or later. Tested on build 26100.
+- **Windows 11** build 22000 (21H2) or later. Tested on builds 26100 and 26200 (24H2).
 - A **second monitor** connected and active.
 - The secondary taskbar enabled: Settings > Personalisation > Taskbar > "Show my taskbar on all displays".
 - The app must run **at the same integrity level as Explorer** (standard user in the normal Windows 11 configuration).
@@ -129,8 +130,8 @@ Menu relocation registers two out-of-process `SetWinEventHook` hooks, and both a
 
 | Action | Result |
 |--------|--------|
-| Left-click a mirrored icon | Translates to a left-click at the matching position on the primary tray. The icon's normal response (toggle flyout, open the app window) fires on the primary. |
-| Right-click a mirrored icon | Translates to a right-click on the primary. A classic Win32 menu is then relocated beside the mirrored icon. A XAML quick-settings flyout usually stays on the primary. The cursor moves to the primary monitor to deliver the click. |
+| Left-click a mirrored icon | Translates to a left-click at the matching position on the primary tray. The flyout the icon opens is then moved to sit above the mirror. |
+| Right-click a mirrored icon | Translates to a right-click on the primary. The resulting menu is then relocated beside the mirrored icon. The cursor moves to the primary monitor to deliver the click and is put back afterwards. |
 | Hover over the mirror strip | Hover events are not synthesised. Tooltips do not appear on the secondary monitor. |
 | Right-click the traymirror tray icon | Opens the traymirror context menu: Reload config, Start with Windows (a checkable toggle), Open config file, Open diagnostics log, Exit. |
 | Monitor connected or disconnected | traymirror handles `WM_DISPLAYCHANGE` and rebuilds mirror windows for the new monitor layout. |
@@ -159,14 +160,12 @@ flowchart LR
     G --> H["MenuRelocator\ntwo out-of-process SetWinEventHook hooks\nEVENT_SYSTEM_MENUPOPUPSTART for classic Win32 menus\nEVENT_OBJECT_SHOW for XAML island flyouts"]
 ```
 
-**Project layout (planned, not yet on disk)**
-
-This first commit is documentation and configuration only. The three projects below are the shape the code takes when it lands, not files you can build today.
+**Project layout**
 
 ```
 traymirror.sln
 src/
-  TrayMirror/             WPF shell: App.xaml, mirror windows, tray icon, Win32 and DWM P/Invoke
+  TrayMirror/             WPF shell: entry point, mirror windows, tray icon, Win32 and DWM P/Invoke
   TrayMirror.Core/        Monitor topology, DPI maths, tray model, config parsing, placement logic
 tests/
   TrayMirror.Core.Tests/  xUnit tests targeting Core only; no WPF dependency
@@ -201,7 +200,7 @@ tests/
 
 **Steps**
 
-The projects have not landed yet, so `dotnet build` has nothing to compile in this commit. These are the commands to use once `traymirror.sln` exists. CI runs the `dotnet restore`, `dotnet build -c Release` and `dotnet test -c Release` steps; `dotnet run` is for local use only.
+CI runs the `dotnet restore`, `dotnet build -c Release` and `dotnet test -c Release` steps; `dotnet run` is for local use only.
 
 ```powershell
 git clone https://github.com/latticelabs-au/traymirror.git
@@ -253,11 +252,27 @@ The `global.json` at the repo root pins the SDK to `10.0.302` with `rollForward:
 
 ---
 
+## 🔍 Diagnosing a wrong strip
+
+Boundary detection has to work against a XAML tray whose element names and nesting have changed between Windows feature updates and differ again under another display language. When the mirrored strip is the wrong width, or no mirror appears at all, the useful question is what the tray on that machine actually looks like:
+
+```powershell
+traymirror.exe --probe
+```
+
+That prints the monitor topology, both taskbar windows, the resolved boundaries and the strategy that produced them, and the full element list of every taskbar, then writes the same report to `%TEMP%	raymirror-probe.txt`. It is what a bug report should carry, and it is directly comparable with the measured baseline in the design document.
+
+For a running instance, set `"diagnosticsLog": true` in the config file instead. The log records every boundary reading, every DWM registration and update, every routed click with its translated coordinates, and every window the menu relocator saw and chose not to move.
+
+---
+
 ## ⚠️ Caveats and known limits
 
 **The cursor warps to the primary monitor on click.** A DWM thumbnail is a visual surface only, so it does not hit test. To make a mirrored icon respond, traymirror moves the cursor to the matching point on the primary taskbar and synthesises the click there. There is no way to route input to a tray icon without doing that. Left-clicks are fast enough that the warp is barely perceptible; right-clicks hold the cursor on the primary for longer, because the menu opens there before it is relocated.
 
-**XAML quick-settings flyouts may stay on the primary monitor.** The Volume, Network, and Notification Centre flyouts in Windows 11 are XAML islands rather than classic menus. `MenuRelocator` sees them through the `EVENT_OBJECT_SHOW` hook and tries to move them with `SetWindowPos`. Classic `#32768` menus (most third-party tray apps) relocate reliably. Whether the XAML-hosted flyouts can be relocated the same way is an open question that has not been settled yet, so expect some of them to stay on the primary.
+**The quick-settings panel relocates, with one trap worth knowing about.** Volume, Network and battery share one panel, which Windows 11 creates as a `ControlCenterWindow` at the full height of the screen, 384x1032 on the reference machine, and then animates into the corner. That is why the general shape rule rejects anything taller than three quarters of the monitor and why this class is on the allow list instead. Opening it also creates a 0x0 `Xaml_WindowedPopupClass`: accepting that one relocated nothing while consuming the arming, so the real panel never moved, which is why an empty rectangle is now rejected before the class is even considered. Verified on build 26200: clicking the mirrored volume icon opens the panel on the secondary monitor, above the mirrored strip. The OneDrive panel, a 360x640 window of its own private class, relocates too, along with the Win32 submenu it opens.
+
+**The mirrored strip does not take the taskbar's tint.** With transparency effects on, the real taskbar reads as a tinted colour while the mirrored strip reads as flat dark grey (rgb(25,45,53) against rgb(35,35,35) on the reference machine). That gap cannot be closed from inside this approach. A thumbnail carries the source window's own surface, and the tint is not in that surface: Windows produces it during composition from an acrylic backdrop drawn behind the taskbar. Painting the mirror window a different colour barely moves it, because the captured surface is about 97% opaque. Turning off Settings, Personalisation, Colours, Transparency effects makes both bars a flat colour that the mirror matches exactly.
 
 **Per-monitor DPI differences soften the mirrored strip.** If the primary monitor runs at 150% scaling and a secondary runs at 100%, DWM must downscale the thumbnail. The result is softer than native icons rendered at 100% and the degree of softening depends on the scaling ratio and the GPU's scaling filter. This is a fundamental cost of the DWM thumbnail approach: it trades icon-rendering brittleness for compositing fidelity, and the fidelity degrades when display scaling ratios diverge significantly.
 

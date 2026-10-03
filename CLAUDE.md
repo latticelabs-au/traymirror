@@ -18,31 +18,32 @@ arithmetic and synthesised there. Validated on Windows 11 build 26100 (24H2).
 
 ## Current repository state, read this first
 
-**No source code exists yet.** This repo is documentation and configuration only. The files that
-actually exist on disk are:
+**The three projects exist and build.** `traymirror.sln`, `src/TrayMirror/`, `src/TrayMirror.Core/`
+and `tests/TrayMirror.Core.Tests/` are on disk. `dotnet build -c Release` is clean with zero
+warnings, `dotnet format --verify-no-changes --severity error` exits 0, and `dotnet test` runs 86
+tests against Core.
 
-```
-.editorconfig  .gitattributes  .gitignore  global.json  Directory.Build.props
-LICENSE  README.md  CHANGELOG.md  CONTRIBUTING.md  CLAUDE.md
-.github/workflows/ci.yml  .github/workflows/release.yml
-.github/dependabot.yml  .github/PULL_REQUEST_TEMPLATE.md  .github/ISSUE_TEMPLATE/
-docs/specs/2026-08-10-traymirror-design.md
-```
+Phase 1 (the mirror core) and phase 2 (input routing and menu relocation) of the design document
+are implemented. Phase 4 (flyout parity) is partly done: the quick-settings panel relocates onto
+the mirror, which the design spec had left as an open question. Phase 3 (the overflow flyout) is
+not done.
 
-`traymirror.sln`, `src/TrayMirror/`, `src/TrayMirror.Core/` and `tests/TrayMirror.Core.Tests/` are
-documented intent, not files on disk. Everything below describes the shape the code must take when
-it lands. Do not write anything that claims those projects already build, ship, or are tested.
+Because the projects are present, the `hashFiles('traymirror.sln')` guards in `ci.yml` are now
+satisfied and the `build` and `format` jobs do real work. Nothing in the workflow needed editing
+when the projects landed, which was the point of writing the guards that way.
 
-Because there is nothing to compile yet, the `build` and `format` jobs in `ci.yml` are guarded on
-`hashFiles('traymirror.sln')` being non-empty, so CI is not red on an empty repo. They start doing
-real work by themselves once the projects land. The `prose` job is not guarded and runs always.
+Verified by hand on Windows 11 build 26200 (24H2), on a 1920x1080 primary at (0,0) with a
+1920x1080 secondary at (-1920,1), both at 100%: the tray strip resolves to 228x48 between the
+overflow chevron at x=1602 and the clock at x=1830, the mirror lands at (-318,1033) flush against
+the secondary clock, a routed left-click on the mirrored volume icon opens the quick-settings
+panel, and the OneDrive panel and its Win32 submenu relocate onto the secondary monitor.
 
 The design of record is `docs/specs/2026-08-10-traymirror-design.md`. Where that spec and this file
 disagree, the spec wins on behaviour and this file wins on process.
 
 ---
 
-## Architecture map (planned, not on disk)
+## Architecture map
 
 ```
 traymirror.sln
@@ -55,7 +56,9 @@ tests/TrayMirror.Core.Tests/  xUnit tests for Core only
 
 Owns everything that requires a window handle or the WPF runtime:
 
-- `App.xaml.cs` and application lifecycle.
+- `Program.cs`, the entry point and the object graph. There is no `App.xaml`: every window is
+  borderless with no WPF content, so a XAML application definition would add a build step and a
+  generated entry point for nothing.
 - Win32 and DWM P/Invoke declarations (`NativeMethods.cs`, `DwmApi.cs`).
 - `MirrorWindow`: the borderless topmost window rendered per secondary monitor.
 - UI Automation client calls to locate the two tray strip boundaries (these run on a background
@@ -93,16 +96,55 @@ application or a real display.
 
 ## What UI Automation is and is not used for
 
-UIA does boundaries only. It queries the primary taskbar for exactly two things: the left edge of
-the first notification-area element, and the left edge of the clock. The difference between them is
-the strip to mirror.
+UIA does two jobs, boundaries and activation.
 
-UIA is **not** used for hit-testing and **not** used for rendering:
+**Boundaries.** It queries the primary taskbar for exactly two things: the left edge of the first
+notification-area element, and the left edge of the clock. The difference between them is the strip
+to mirror.
+
+**Activation.** A left-click on a mirror is delivered by invoking the real tray icon's
+`InvokePattern`, not by synthesising a mouse click on it. Measured on build 26200: all ten tray
+elements expose `InvokePattern`, invoking one opens its flyout without moving the cursor and
+without taking the foreground, and that is what makes a flyout's open-and-close behaviour survive
+being driven from a mirror. `SendInput` remains the fallback, and remains the only route for right
+clicks, middle clicks and the wheel, because `Invoke` is the element's default action and has no
+equivalent for those.
+
+Two measured facts that the implementation depends on, both worth keeping written down:
+
+- `AutomationElement.FromPoint` over a tray icon returns only the `Shell_TrayWnd` pane and its
+  desktop parent, neither of which supports any pattern. The XAML tray provider does not implement
+  hit testing from a point, so the element is found by walking the tree and comparing rectangles.
+- Each tray button contains a 16x16 `Image` child that encloses the same point and supports no
+  pattern. Selecting the smallest enclosing element lands on that image, so the search must select
+  the smallest enclosing element **that supports `InvokePattern`**.
+
+UIA is still **not** used for hit-testing and **not** used for rendering:
 
 - Rendering is DWM, which composites the real pixels for us.
-- Hit-testing is the arithmetic translation in Core described above.
+- Hit-testing is the arithmetic translation in Core described above. Deciding *which* icon was
+  clicked is coordinate arithmetic; UIA is only handed the resulting point.
 
 Do not write a sentence that gives UIA either of those two jobs.
+
+### What may go on MenuRelocator's class allow list
+
+Only a window that carries the pixels the user is meant to see. Not the window that hosts it.
+
+Measured on build 26200, the language switcher makes the distinction concrete. Clicking the input
+indicator raises three windows: a `Shell_InputSwitchDismissOverlay` spanning the whole virtual
+desktop, a `Shell_InputSwitchTopLevelWindow` the size of the primary monitor, and then the list
+itself, a 328x105 `Xaml_WindowedPopupClass` resting just above the taskbar. Only the last one is
+worth moving, and the general shape rule already accepts it.
+
+Putting the host on the allow list actively breaks the feature, in a way that looks like success:
+the host is raised first, so it is accepted and relocated, that consumes the arming, and the real
+popup is then never examined. Moving the host also moves nothing visible, because the content is
+composed separately, and it leaves an invisible monitor-sized window over the target monitor that
+swallows clicks until it closes.
+
+`ControlCenterWindow` is on the list because it is genuinely the window carrying the pixels, even
+though it is created at the full height of the screen and animates its content into the corner.
 
 ### MenuRelocator hooks
 
@@ -233,6 +275,80 @@ Listen for `WM_DISPLAYCHANGE`. On receipt:
 
 Do not assume the monitor set is stable between `WM_DISPLAYCHANGE` messages. Rapid plug-unplug
 sequences arrive as multiple messages; rebuild idempotently.
+
+### Full-screen applications
+
+**The shell does not hide the taskbar when an application goes full screen.** Measured on build
+26200 with a real full-screen window on the primary: `Shell_TrayWnd` keeps `IsWindowVisible` true
+and keeps exactly the same rectangle. It is simply covered, by z-order. Nothing is reported: no
+`WM_DISPLAYCHANGE`, because the resolution did not change; no working-area `WM_SETTINGCHANGE`,
+because a covering window displaces nothing; and no visibility event, because nothing was hidden.
+
+Three shell mechanisms were checked and all three are dead ends. `ABN_FULLSCREENAPP` is documented
+but carries one boolean with no indication of which monitor. `SHQueryUserNotificationState` is a
+getter with no notification and is global rather than per monitor. `IAppVisibility` reports whether
+a monitor shows immersive Windows 8 shell surfaces, which on Windows 11 is essentially never.
+
+So `FullScreenWatcher` looks at the windows, which is what the shell itself does. Two out-of-process
+hooks: `EVENT_SYSTEM_FOREGROUND` for an application brought up full screen, and
+`EVENT_OBJECT_LOCATIONCHANGE` re-scoped to the foreground window's own thread, for a window already
+in front that then resizes itself (a video going full screen in a browser raises no foreground
+event). Each event triggers a sweep of the top-level windows, which is a response to an event and
+never a timer.
+
+Rules the sweep depends on, each of them load-bearing:
+
+- Compare against the monitor's **full bounds**, never its working area. That single choice is what
+  separates full screen from merely maximised, because a maximised window stops at the working area
+  and so leaves the taskbar's height uncovered.
+- Ignore `Progman` and `WorkerW`. The desktop is exactly monitor sized, so without this every
+  monitor reports a full-screen application permanently.
+- Ignore cloaked windows (`DWMWA_CLOAKED`). A suspended packaged application or a window on another
+  virtual desktop has a perfectly valid full-screen rectangle and is not on screen at all.
+- Ignore this process's own windows. Mirrors are topmost and sit on the monitors being judged.
+- Sweep all top-level windows rather than only the foreground one. A video playing full screen on
+  the secondary monitor stays full screen when focus moves to the primary, and judging by the
+  foreground alone would un-hide that mirror the moment the user clicked away.
+
+A mirror is hidden only when a full-screen application covers **the monitor it sits on**. One on
+the primary deliberately does not hide it: watching something full screen on one screen is exactly
+when the tray still being readable on the other is worth having. The strip does become a view of a
+tray that cannot be clicked through to until the user leaves full screen, and that is the accepted
+trade.
+
+Hiding and showing are applied the moment the event arrives, not deferred to a rebuild. A rebuild
+waits for the coalescer's quiet window and then re-reads the tray over UI Automation, which would
+put roughly half a second between an application going full screen and the strip getting out of the
+way. The windows already exist and already know where they go, so visibility costs one
+`SetWindowPos`. Measured on build 26200: 115ms to hide, 91ms to come back, both including the test
+harness's own 50ms polling granularity.
+
+### Taskbar visibility
+
+Separately from the above, a taskbar can genuinely be hidden, by auto-hide or by the shell. That
+does raise visibility events, and `ShellWatcher` registers a third out-of-process
+`SetWinEventHook`, for `EVENT_OBJECT_SHOW` through `EVENT_OBJECT_HIDE`, scoped to the shell's
+process and filtered to the two taskbar classes. This is separate from `MenuRelocator`'s two hooks
+and does not change that component's contract. Like those, it is out of process and injects nothing.
+
+A mirror must follow the visibility of the taskbar it is anchored to:
+
+- **Primary taskbar hidden.** There is nothing to mirror while the source is off screen. Hide every
+  mirror, and keep the windows and their thumbnail registrations so that coming back is a
+  placement rather than a full rebuild.
+- **A secondary taskbar hidden.** Hide that monitor's mirror only.
+- **A monitor with no secondary taskbar at all.** This is not the same case. That user has "show my
+  taskbar on all displays" turned off, and the mirror is anchored to the monitor's bottom right
+  corner instead. Treating hidden and absent alike is what leaves a strip floating over a
+  full-screen application.
+
+Never destroy mirrors on a transient failure. A boundary read can fail while the shell is settling,
+and a torn-down mirror stays gone until the next shell event, which may be a long way off. Hide
+instead, and retry the read: hiding alone still leaves recovery to an event that may never arrive,
+which was observed on build 26200 as mirrors staying hidden indefinitely on an otherwise idle
+desktop. The retry is bounded, five attempts one second apart, and stops as soon as a read
+succeeds. A bounded retry after a failure is error recovery, not the polling the rule above
+forbids.
 
 ### DPI change
 
@@ -391,8 +507,10 @@ zero CPU overhead. A bitmap capture loop (GDI `BitBlt`, D3D readback, or any pol
 defeats the entire architecture, introduces tearing, and burns CPU.
 
 **Do not poll for tray changes.** Use the registered `TaskbarCreated` message, `WM_DISPLAYCHANGE`,
-`WM_DPICHANGED`, and the two out-of-process WinEvent hooks described above. Polling is brittle,
-power-expensive, and races with the very restarts it tries to detect.
+`WM_DPICHANGED`, the working-area `WM_SETTINGCHANGE`, `MenuRelocator`'s two out-of-process WinEvent
+hooks, `ShellWatcher`'s out-of-process taskbar visibility hook, `FullScreenWatcher`'s two
+out-of-process hooks, and the UI Automation structure-changed subscription on the tray. Every one of those is a subscription the shell raises.
+Polling is brittle, power-expensive, and races with the very restarts it tries to detect.
 
 **Do not inject into explorer.exe.** traymirror is designed to be safe on locked-down corporate
 machines. In-process injection (DLL injection, `SetWindowsHookEx` with a DLL, `WriteProcessMemory`)

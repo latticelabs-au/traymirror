@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for TrayMirror.Core only. It inherits the Windows target framework from
+    Directory.Build.props because the monitor and DPI helpers call Win32, but nothing
+    here needs a WPF dispatcher, a message pump or a real display: every rule under
+    test is arithmetic over rectangles, so the arrangements exercised below include
+    ones the development machine cannot physically produce.
+  -->
+  <PropertyGroup>
+    <RootNamespace>TrayMirror.Core.Tests</RootNamespace>
+    <AssemblyName>TrayMirror.Core.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Suppressions">
+    <!-- CA1515: xUnit discovers only public test classes, so the usual advice to keep
+         types internal in a non-library assembly cannot be followed here.
+         CS1591: those same classes are public for the runner's benefit rather than as an
+         API, so requiring XML documentation on each one produces noise and no reader.
+         GenerateDocumentationFile stays on (inherited from Directory.Build.props) because
+         IDE0005, the unused-using rule, only reports at build time when it is set. -->
+    <NoWarn>$(NoWarn);CA1515;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TrayMirror.Core\TrayMirror.Core.csproj" />
+  </ItemGroup>
+
+</Project>

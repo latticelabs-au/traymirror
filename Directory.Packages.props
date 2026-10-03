@@ -1,0 +1,23 @@
+<!--
+  Central package management. Versions live here and nowhere else, so a package
+  cannot end up at two different versions in two projects without the conflict
+  being visible in a single file.
+
+  TrayMirror and TrayMirror.Core take no NuGet dependencies at all. Everything
+  they need (WPF, UI Automation, System.Text.Json) ships in the .NET 10 Windows
+  Desktop shared framework. The entries below are the test stack only.
+-->
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+</Project>

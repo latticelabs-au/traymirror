@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    UI-free by construction. This project must never reference WPF, System.Windows,
+    PresentationCore, PresentationFramework or WindowsBase, because the test suite
+    runs headlessly with no dispatcher and no display. It does target a Windows TFM,
+    since monitor topology and DPI come from Win32, but nothing here needs a window.
+  -->
+  <PropertyGroup>
+    <RootNamespace>TrayMirror.Core</RootNamespace>
+    <AssemblyName>TrayMirror.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>
