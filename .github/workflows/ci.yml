@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # ACTIVATION GUARD. Every step below runs only once traymirror.sln is in
       # the checkout. Without the guard, restore, build and test each fail on a
@@ -104,7 +104,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # ACTIVATION GUARD, for the same reason as the build job. dotnet format
       # loads the projects through MSBuild, so with no solution on disk it fails
@@ -146,7 +146,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # POLICY versus ENFORCEMENT, which are two different things.
       # The house rule bans U+2014 in every tracked file. This job enforces that
