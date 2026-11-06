@@ -57,7 +57,7 @@ jobs:
 
       - name: Set up the pinned .NET SDK
         if: hashFiles('traymirror.sln') != ''
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -115,7 +115,7 @@ jobs:
 
       - name: Set up the pinned .NET SDK
         if: hashFiles('traymirror.sln') != ''
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
