@@ -67,7 +67,7 @@ jobs:
       # projects land, and a pattern that matches nothing is simply ignored.
       - name: Cache NuGet packages
         if: hashFiles('traymirror.sln') != ''
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '**/Directory.Packages.props', '**/*.csproj', 'global.json') }}
@@ -121,7 +121,7 @@ jobs:
 
       - name: Cache NuGet packages
         if: hashFiles('traymirror.sln') != ''
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '**/Directory.Packages.props', '**/*.csproj', 'global.json') }}
