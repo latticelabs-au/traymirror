@@ -204,7 +204,7 @@ jobs:
           Get-Content -LiteralPath 'dist/SHA256SUMS.txt'
 
       - name: Upload the release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: traymirror-win-x64
           path: dist/**
